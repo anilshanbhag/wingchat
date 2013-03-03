@@ -1,0 +1,196 @@
+<html>
+	<head>
+		<title> Welcome to WingChat </title>
+	</head>
+	<body>
+		<div id="topbar">
+			<img style="height:100px;" src="wingchat.png" alt="Wing Chat" />
+			<input type="text" name="location" id="location" placeholder="location" />
+			<input type="text" name="nick" id="nick" placeholder="nick" />
+			<input type="submit" id="connect" />
+		</div>
+		<div id="container">
+			<video style="width:320px; height=240px;" autoplay></video>
+			<!-- <img src=""> -->
+			<canvas id="c0" style="display:none; width:320px; height:240px;"></canvas>
+			<canvas id="c1" style="display:none; width:320px; height:240px;"></canvas>
+			<canvas id="c2" style="display:none; width:320px; height:240px;"></canvas>
+			<canvas id="c3" style="display:none; width:320px; height:240px;"></canvas>
+			<canvas id="c4" style="display:none; width:320px; height:240px;"></canvas>
+			<img id="tester" />
+		</div>
+		<script type="text/javascript">
+
+var onFailSoHard = function(e) {
+	console.log('Reeeejected!', e);
+};
+
+function WingChat( domElem, socketLoc, nick) {
+	this.location = socketLoc;
+	this.dom = domElem;
+	this.nick = nick;
+	this.id = null; //Will be assigned by server
+
+	this.videoStream = null;
+	this.video = document.querySelector('video');
+	this.canvas = document.querySelector('#c0');
+	this.canvas.width = 320;
+	this.canvas.height = 240;
+	this.canvas.style.display = "block";
+
+	console.log(this.video.videoWidth);
+
+	this.ctx = this.canvas.getContext('2d');
+
+    this.messageHandlers = {
+        // initCommands: this.initCommands.bind(this),
+        vs: this.vs.bind(this),
+        welcome: this.welcome.bind(this),
+        // drawLine: this.drawLine.bind(this),
+        // clear: this.clear.bind(this)
+    };
+}
+
+WingChat.prototype.init = function() {
+	var that = this;
+	
+	navigator.webkitGetUserMedia({video: true}, function(stream) {
+		that.video.src = window.URL.createObjectURL(stream);
+		that.videoStream = stream;
+		that.connect();
+
+		window.setInterval(function(){
+			that.snap();
+		}, 2000);
+	}, onFailSoHard);
+}
+
+WingChat.prototype.connect = function() {
+	var wctor = window['MozWebSocket'] ? MozWebSocket : WebSocket;
+	var url = 'ws://' + this.location;
+	this.socket = new wctor(url, 'echo-protocol');
+
+	this.socket.onopen = this.registerNick.bind(this);
+    this.socket.onmessage = this.handleWebsocketMessage.bind(this);
+    this.socket.onclose = this.handleWebsocketClose.bind(this);
+
+    // this.socket.send('hello world');
+}
+
+WingChat.prototype.handleWebsocketMessage = function(message) {
+	console.log(message);
+    try {
+        var command = JSON.parse(message.data);
+    }
+    catch(e) { /* do nothing */ }
+    
+    if (command) {
+        this.dispatchCommand(command);
+    }
+};
+
+WingChat.prototype.handleWebsocketClose = function() {
+    alert("WebSocket Connection Closed.");
+};
+
+WingChat.prototype.dispatchCommand = function(command) {
+    // Do we have a handler function for this command?
+    var handler = this.messageHandlers[command.msg];
+    if (typeof(handler) === 'function') {
+        // If so, call it and pass the parameter data
+        handler.call(this, command);
+    }
+};
+
+WingChat.prototype.initCommands = function(commandList) {
+    /* Upon connection, the contents of the whiteboard
+       are drawn by replaying all commands since the
+       last time it was cleared */
+    
+    console.log(commandList);
+
+    // commandList.forEach(function(command) {
+    //     this.dispatchCommand(command);
+    // }.bind(this));
+};
+
+/* VIDEO STREAMING FUNCTIONS */
+WingChat.prototype.snap = function(){
+	if (this.id == null) return;
+	var scaleFactor = 0.25;
+  	var w = this.video.videoWidth * scaleFactor;
+    var h = this.video.videoHeight * scaleFactor;
+    this.ctx.drawImage(this.video, 0, 0, 320, 240);
+    // console.log(this.canvas.toDataURL('image/webp'));
+    this.sendVideoStream(this.canvas.toDataURL('image/webp'));
+}
+
+/* END VIDEO STREAMING FUNCTIONS */
+
+/* RECIEVING FUNCTIONS */
+
+WingChat.prototype.welcome = function(data) {
+	// Initialize all the canvas blocks 
+	for(var i = 0; i < data.data.length; i++) {
+		var can = document.querySelector('#c' + i.toString());
+		console.log('#c' + i.toString());
+		// can.width = 320;
+		can.height = 240;
+		can.style.display = "block";
+	}
+
+	this.id = data.data.length - 1;
+	this.canvas = document.querySelector('#c' + this.id.toString());
+	this.ctx = this.canvas.getContext('2d');
+
+	console.log("Got id", id);
+}
+
+WingChat.prototype.vs = function(data) {
+	console.log('in vs', data.id);
+	var id = data.id;
+	var msg = data.data;
+	// console.log(id,data);
+
+	var can = document.querySelector('#c' + id.toString());
+
+	document.querySelector('#tester').src = msg;
+
+	var img = new Image();
+	img.src = msg;
+	var ctx = can.getContext('2d');
+	console.log(ctx, img);
+
+	ctx.drawImage(img, 0, 0);
+}
+
+/* END RECIEVING FUNCTIONS */
+
+/* SENDING FUNCTIONS */
+
+WingChat.prototype.registerNick = function() {
+    this.socket.send(JSON.stringify({ msg: 'register' , data : this.nick }));
+};
+
+WingChat.prototype.sendVideoStream = function(vs) {
+    this.socket.send(JSON.stringify({ msg: 'vs', data: vs}));	
+};
+
+/* END SENDING FUNCTIONS */
+
+var wc = null; 
+
+document.querySelector('#connect').addEventListener('click', function() {
+	var location = document.querySelector('#location').value;
+	location = "localhost:8080";
+
+	var nick = document.querySelector('#nick').value;
+
+	wc = new WingChat( document.querySelector('#container') , location , nick );
+	wc.init();
+	// wc.connect();
+}, false);
+
+		</script>
+	</body>
+</html>
